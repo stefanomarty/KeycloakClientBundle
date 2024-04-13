@@ -206,6 +206,53 @@ class KeycloakClient implements IamClientInterface
         }
     }
 
+    public function authenticateCodeGrant(): ?AccessTokenInterface
+    {
+        try {
+            if (!isset($_GET['code'])) {
+                // If we don't have an authorization code then get one
+                $authUrl = $this->keycloakProvider->getAuthorizationUrl();
+                $_SESSION['oauth2state'] = $this->keycloakProvider->getState();
+                header('Location: '.$authUrl);
+                exit;
+
+            // Check given state against previously stored one to mitigate CSRF attack
+            } elseif (empty($_GET['state']) || ($_GET['state'] !== $_SESSION['oauth2state'])) {
+                unset($_SESSION['oauth2state']);
+                exit('Invalid state, make sure HTTP sessions are enabled.');
+            } else {
+                // Try to get an access token (using the authorization code grant)
+                try {
+                    $token = $this->keycloakProvider->getAccessToken('authorization_code', [
+                        'code' => $_GET['code']
+                    ]);
+                } catch (Exception $e) {
+                    exit('Failed to get access token: '.$e->getMessage());
+                }
+            }
+            $accessToken = new AccessToken();
+            $accessToken->setToken($token->getToken())
+                ->setExpires($token->getExpires())
+                ->setRefreshToken($token->getRefreshToken())
+                ->setValues($token->getValues());
+
+            $this->keycloakClientLogger->info('KeycloakClient::authenticateCodeGrant', [
+                'token' => $accessToken->getToken(),
+                'expires' => $accessToken->getExpires(),
+                'refresh_token' => $accessToken->getRefreshToken(),
+            ]);
+
+            return $accessToken;
+        }
+        catch (\Exception $e) {
+            $this->keycloakClientLogger->error('KeycloakClient::authenticateCodeGrant', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
     /**
      * @param array<string> $roles
      */
